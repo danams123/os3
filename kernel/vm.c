@@ -15,42 +15,9 @@ extern char etext[]; // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
-// for assignment3
-uint64 ref_count[NUM_PYS_PAGES];
-
-void set_ref_count(uint64 pa, uint64 new_val)
-{
-  uint64 counter;
-  do
-  {
-    counter = ref_count[INDEX(pa)];
-  } while (!cas(&(ref_count[INDEX(pa)]), counter, new_val));
-}
-
-void inc_ref_count(uint64 pa)
-{
-  uint64 counter;
-  do
-  {
-    counter = ref_count[INDEX(pa)];
-  } while (!cas(&(ref_count[INDEX(pa)]), counter, counter + 1));
-}
-
-void dec_ref_count(uint64 pa)
-{
-  uint64 counter;
-  do
-  {
-    counter = ref_count[INDEX(pa)];
-  } while (!cas(&(ref_count[INDEX(pa)]), counter, counter - 1));
-}
-
-uint64 get_ref_count(uint64 pa){
-    return }
-
 // Make a direct-map page table for the kernel.
 pagetable_t
-    kvmmake(void)
+kvmmake(void)
 {
   pagetable_t kpgtbl;
 
@@ -340,31 +307,30 @@ void uvmfree(pagetable_t pagetable, uint64 sz)
 int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
   pte_t *pte;
-  uint64 pa, i;
-  uint flags;
-  char *mem;
+  uint64 va, pa;
 
-  for (i = 0; i < sz; i += PGSIZE)
+  for (va = 0; va < sz; va += PGSIZE)
   {
-    if ((pte = walk(old, i, 0)) == 0)
+
+    if ((pte = walk(old, va, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if ((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
+
     pa = PTE2PA(*pte);
-    flags = PTE_FLAGS(*pte);
-    if ((mem = kalloc()) == 0)
+
+    if (*pte & PTE_W)
+      *pte = (*pte | PTE_COW) & ~PTE_W;
+
+    if (mappages(new, va, PGSIZE, pa, (uint)PTE_FLAGS(*pte)) < 0)
       goto err;
-    memmove(mem, (char *)pa, PGSIZE);
-    if (mappages(new, i, PGSIZE, (uint64)mem, flags) != 0)
-    {
-      kfree(mem);
-      goto err;
-    }
+
+    reference_change(pa, 1);
   }
   return 0;
 
 err:
-  uvmunmap(new, 0, i / PGSIZE, 1);
+  uvmunmap(new, 0, va / PGSIZE, 1);
   return -1;
 }
 
@@ -390,6 +356,10 @@ int copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
   while (len > 0)
   {
     va0 = PGROUNDDOWN(dstva);
+
+    if (COW_handler(va0, pagetable) < 0)
+      return -1;
+
     pa0 = walkaddr(pagetable, va0);
     if (pa0 == 0)
       return -1;
