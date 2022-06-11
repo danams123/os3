@@ -39,6 +39,10 @@ int reference_change(uint64 pa, uint64 to_add)
 
   return tmp;
 }
+int get_counter(uint64 pa)
+{
+  return page_counter[INDEX((uint64)pa)];
+}
 
 void kinit()
 {

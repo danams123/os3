@@ -248,9 +248,18 @@ int COW_handler(uint64 va, pagetable_t pt)
   if ((*pte & PTE_COW) == 0)
     return 1;
 
+  pa = PTE2PA(*pte);
+
+  //if this the only proc that point on the page.
+  if(get_counter(pa) == 1){
+    flags = PTE_FLAGS(*pte);
+    *pte = *pte | ((flags & ~PTE_COW) | PTE_W);
+    return 0;
+  }
+
   if ((pa_cow = kalloc()) != 0)
   {
-    pa = PTE2PA(*pte);
+    
     flags = PTE_FLAGS(*pte);
 
     memmove(pa_cow, (char *)pa, PGSIZE);
